@@ -1,5 +1,5 @@
 // gomodjail:confined
-module github.com/lima-vm/lima
+module github.com/saz97/lima
 
 go 1.23.0
 
