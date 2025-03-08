@@ -7,7 +7,7 @@ import (
 	"net/rpc"
 	"os"
 
-	"github.com/saz97/lima/pkg/plugin"
+	"github.com/lima-vm/lima/pkg/plugin"
 )
 
 // 用于演示的 QemuPlugin，真正场景中可实现更完整的逻辑

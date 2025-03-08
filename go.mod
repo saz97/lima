@@ -1,7 +1,9 @@
 // gomodjail:confined
-module github.com/saz97/lima
+module github.com/lima-vm/lima
 
 go 1.23.0
+
+replace github.com/lima-vm/lima => /lima
 
 require (
 	al.essio.dev/pkg/shellescape v1.5.1
@@ -13,7 +15,7 @@ require (
 	github.com/cheggaaa/pb/v3 v3.1.7 // gomodjail:unconfined
 	github.com/containerd/containerd v1.7.26
 	github.com/containerd/continuity v0.4.5
-	github.com/containers/gvisor-tap-vsock v0.8.3 // gomodjail:unconfined
+	github.com/containers/gvisor-tap-vsock v0.8.4 // gomodjail:unconfined
 	github.com/coreos/go-semver v0.3.1
 	github.com/cpuguy83/go-md2man/v2 v2.0.6
 	github.com/cyphar/filepath-securejoin v0.4.1
@@ -43,10 +45,10 @@ require (
 	github.com/spf13/cobra v1.9.1 // gomodjail:unconfined
 	github.com/spf13/pflag v1.0.6
 	github.com/wk8/go-ordered-map/v2 v2.1.8
-	golang.org/x/net v0.36.0
-	golang.org/x/sync v0.11.0
-	golang.org/x/sys v0.30.0 // gomodjail:unconfined
-	golang.org/x/text v0.22.0
+	golang.org/x/net v0.37.0
+	golang.org/x/sync v0.12.0
+	golang.org/x/sys v0.31.0 // gomodjail:unconfined
+	golang.org/x/text v0.23.0
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.5 // gomodjail:unconfined
 	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
@@ -119,10 +121,10 @@ require (
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
-	golang.org/x/crypto v0.35.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/mod v0.22.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
-	golang.org/x/term v0.29.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
 	golang.org/x/tools v0.28.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
@@ -139,3 +141,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+require github.com/saz97/lima v0.8.2
