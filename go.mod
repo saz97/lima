@@ -3,7 +3,7 @@ module github.com/lima-vm/lima
 
 go 1.23.0
 
-replace github.com/lima-vm/lima => /lima
+replace github.com/lima-vm/lima => /lima //my local path
 
 require (
 	al.essio.dev/pkg/shellescape v1.5.1

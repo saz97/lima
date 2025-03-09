@@ -3,14 +3,15 @@ package rpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/rpc"
 	"os/exec"
 	"time"
 
 	"github.com/lima-vm/lima/pkg/driver"
-	"github.com/saz97/lima/pkg/plugin"
+	"github.com/lima-vm/lima/pkg/limayaml"
+	"github.com/lima-vm/lima/pkg/plugin"
+	"github.com/sirupsen/logrus"
 )
 
 type RPCDriver struct {
@@ -22,31 +23,20 @@ type RPCDriver struct {
 func New(base *driver.BaseDriver) *RPCDriver {
 	cmd := exec.Command("/lima/qemu-plugin/lima-qemu-plugin")
 
-	// 启动插件进程并捕获错误
 	if err := cmd.Start(); err != nil {
-		panic(fmt.Errorf("failed to start external driver: %w", err))
+		logrus.Errorf("[RPCDriver] failed to start external driver: %v", err)
+		return nil
 	}
 
-	// 等待插件监听端口（最大等待 10 秒）
-	timeout := time.After(10 * time.Second)
-	tick := time.Tick(500 * time.Millisecond)
-	for {
-		select {
-		case <-timeout:
-			panic("timeout waiting for plugin to start")
-		case <-tick:
-			conn, err := net.DialTimeout("tcp", "127.0.0.1:9999", 1*time.Second)
-			if err == nil {
-				conn.Close()
-				goto Connected
-			}
-		}
+	if err := waitForPlugin("127.0.0.1:9991", 10*time.Second); err != nil {
+		logrus.Errorf("[RPCDriver] failed to wait for plugin: %v", err)
+		return nil
 	}
-Connected:
 
-	client, err := rpc.Dial("tcp", "127.0.0.1:9999")
+	client, err := rpc.Dial("tcp", "127.0.0.1:9991")
 	if err != nil {
-		panic(fmt.Errorf("failed to dial driver RPC: %w", err))
+		logrus.Errorf("[RPCDriver] failed to dial driver RPC: %v", err)
+		return nil
 	}
 
 	return &RPCDriver{
@@ -56,37 +46,54 @@ Connected:
 	}
 }
 
-// 下面的 Start 是与 driver.Driver 接口匹配的方法。
-// 可以转发到外部 RPC 服务
-func (r *RPCDriver) Start(ctx context.Context) (chan error, error) {
-	ch := make(chan error, 1)
-	go func() {
-		var reply bool
-		args := plugin.StartArgs{
-			InstanceName: r.base.Instance.Name,
-			Config:       []byte("...some config..."),
+// waitForPlugin waits for the RPC server to be available within the timeout period.
+func waitForPlugin(address string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 1*time.Second)
+		if err == nil {
+			conn.Close()
+			return nil
 		}
-		err := r.client.Call("QemuPlugin.Start", args, &reply)
-		ch <- err
+		time.Sleep(500 * time.Millisecond) // Retry interval
+	}
+	return errors.New("timeout waiting for plugin to start")
+}
+
+func (d *RPCDriver) Start(ctx context.Context) (chan error, error) {
+	logrus.Info("[RPCDriver] Sending Start request to RPC server")
+	ch := make(chan error, 1)
+
+	go func() {
+		defer close(ch)
+
+		configBytes, err := limayaml.Marshal(d.base.Instance.Config, true)
+		if err != nil {
+			logrus.Errorf("[RPCDriver] Config marshal error: %v", err)
+			ch <- err
+			return
+		}
+
+		args := plugin.StartArgs{
+			InstanceName: d.base.Instance.Name,
+			Config:       configBytes,
+		}
+
+		var reply bool
+		if err := d.client.Call("QemuPlugin.Start", args, &reply); err != nil {
+			logrus.Errorf("[RPCDriver] Start failed: %v", err)
+			ch <- err
+			return
+		}
+
+		logrus.Infof("[RPCDriver] Start succeeded (reply: %v)", reply)
+		ch <- nil
 	}()
+
 	return ch, nil
 }
 
-// Stop 方法
-func (r *RPCDriver) Stop(ctx context.Context) error {
-	var reply bool
-	args := plugin.StopArgs{
-		InstanceName: r.base.Instance.Name,
-	}
-	err := r.client.Call("QemuPlugin.Stop", args, &reply)
-	if err != nil {
-		return err
-	}
-
-	// 可在 Stop 后关闭进程
-	if r.cmd.Process != nil {
-		_ = r.cmd.Process.Kill()
-	}
+func (d *RPCDriver) Stop(_ context.Context) error {
 	return nil
 }
 func (d *RPCDriver) Validate() error {

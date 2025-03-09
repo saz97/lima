@@ -101,9 +101,13 @@ func Prepare(ctx context.Context, inst *store.Instance) (*Prepared, error) {
 	if err := limaDriver.CreateDisk(ctx); err != nil {
 		return nil, err
 	}
-	nerdctlArchiveCache, err := ensureNerdctlArchiveCache(ctx, inst.Config, created)
-	if err != nil {
-		return nil, err
+	var nerdctlArchiveCache string
+
+	if inst.VMType != limayaml.RPC {
+		nerdctlArchiveCache, err = ensureNerdctlArchiveCache(ctx, inst.Config, created)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &Prepared{
@@ -156,6 +160,18 @@ func Start(ctx context.Context, inst *store.Instance, limactl string, launchHost
 	prepared, err := Prepare(ctx, inst)
 	if err != nil {
 		return err
+	}
+
+	if inst.VMType == limayaml.RPC {
+		logrus.Info("Starting RPC driver, bypassing HostAgent")
+		errCh, err := prepared.Driver.Start(ctx)
+		if err := <-errCh; err != nil {
+			return err
+		}
+		if err != nil {
+			return fmt.Errorf("RPC driver failed to start: %w", err)
+		}
+		return nil
 	}
 
 	if limactl == "" {

@@ -93,7 +93,7 @@ var (
 	OSTypes    = []OS{LINUX}
 	ArchTypes  = []Arch{X8664, AARCH64, ARMV7L, RISCV64}
 	MountTypes = []MountType{REVSSHFS, NINEP, VIRTIOFS, WSLMount}
-	VMTypes    = []VMType{QEMU, VZ, WSL2}
+	VMTypes    = []VMType{QEMU, VZ, WSL2, RPC}
 )
 
 type User struct {
