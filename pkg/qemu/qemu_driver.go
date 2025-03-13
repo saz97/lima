@@ -10,8 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
+	"net/rpc"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,9 +26,11 @@ import (
 	"github.com/lima-vm/lima/pkg/driver"
 	"github.com/lima-vm/lima/pkg/limayaml"
 	"github.com/lima-vm/lima/pkg/networks/usernet"
+	"github.com/lima-vm/lima/pkg/plugin"
 	"github.com/lima-vm/lima/pkg/store"
 	"github.com/lima-vm/lima/pkg/store/filenames"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 type LimaQemuDriver struct {
@@ -37,12 +39,51 @@ type LimaQemuDriver struct {
 	qWaitCh chan error
 
 	vhostCmds []*exec.Cmd
+
+	client    *rpc.Client
+	ProcessId string
 }
 
 func New(driver *driver.BaseDriver) *LimaQemuDriver {
-	return &LimaQemuDriver{
+	l := &LimaQemuDriver{
 		BaseDriver: driver,
 	}
+
+	cmd := exec.Command("/lima/qemu-plugin/lima-qemu-plugin")
+
+	if err := cmd.Start(); err != nil {
+		logrus.Errorf("[LimaQemuDriver] failed to start external driver: %v", err)
+		return nil
+	}
+
+	if err := waitForPlugin("127.0.0.1:9991", 10*time.Second); err != nil {
+		logrus.Errorf("[LimaQemuDriver] failed to wait for plugin: %v", err)
+		return nil
+	}
+
+	client, err := rpc.Dial("tcp", "127.0.0.1:9991")
+	if err != nil {
+		logrus.Errorf("[LimaQemuDriver] failed to dial driver RPC: %v", err)
+		return nil
+	}
+	logrus.Info("[LimaQemuDriver] connected to driver RPC")
+	l.client = client
+	l.ProcessId = ""
+
+	return l
+}
+
+func waitForPlugin(address string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 1*time.Second)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond) // Retry interval
+	}
+	return errors.New("timeout waiting for plugin to start")
 }
 
 func (l *LimaQemuDriver) Validate() error {
@@ -63,142 +104,34 @@ func (l *LimaQemuDriver) CreateDisk(ctx context.Context) error {
 }
 
 func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer func() {
-		if l.qCmd == nil {
-			cancel()
-		}
-	}()
+	ch := make(chan error, 1)
 
-	qCfg := Config{
-		Name:         l.Instance.Name,
-		InstanceDir:  l.Instance.Dir,
-		LimaYAML:     l.Instance.Config,
-		SSHLocalPort: l.SSHLocalPort,
-		SSHAddress:   l.Instance.SSHAddress,
-	}
-	qExe, qArgs, err := Cmdline(ctx, qCfg)
-	if err != nil {
-		return nil, err
-	}
-
-	var vhostCmds []*exec.Cmd
-	if *l.Instance.Config.MountType == limayaml.VIRTIOFS {
-		vhostExe, err := FindVirtiofsd(qExe)
-		if err != nil {
-			return nil, err
-		}
-
-		for i := range l.Instance.Config.Mounts {
-			args, err := VirtiofsdCmdline(qCfg, i)
-			if err != nil {
-				return nil, err
-			}
-
-			vhostCmds = append(vhostCmds, exec.CommandContext(ctx, vhostExe, args...))
-		}
-	}
-
-	var qArgsFinal []string
-	applier := &qArgTemplateApplier{}
-	for _, unapplied := range qArgs {
-		applied, err := applier.applyTemplate(unapplied)
-		if err != nil {
-			return nil, err
-		}
-		qArgsFinal = append(qArgsFinal, applied)
-	}
-	qCmd := exec.CommandContext(ctx, qExe, qArgsFinal...)
-	qCmd.ExtraFiles = append(qCmd.ExtraFiles, applier.files...)
-	qStdout, err := qCmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	go logPipeRoutine(qStdout, "qemu[stdout]")
-	qStderr, err := qCmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
-	go logPipeRoutine(qStderr, "qemu[stderr]")
-
-	for i, vhostCmd := range vhostCmds {
-		vhostStdout, err := vhostCmd.StdoutPipe()
-		if err != nil {
-			return nil, err
-		}
-		go logPipeRoutine(vhostStdout, fmt.Sprintf("virtiofsd-%d[stdout]", i))
-		vhostStderr, err := vhostCmd.StderrPipe()
-		if err != nil {
-			return nil, err
-		}
-		go logPipeRoutine(vhostStderr, fmt.Sprintf("virtiofsd-%d[stderr]", i))
-	}
-
-	for i, vhostCmd := range vhostCmds {
-		logrus.Debugf("vhostCmd[%d].Args: %v", i, vhostCmd.Args)
-		if err := vhostCmd.Start(); err != nil {
-			return nil, err
-		}
-
-		vhostWaitCh := make(chan error)
-		go func() {
-			vhostWaitCh <- vhostCmd.Wait()
-		}()
-
-		vhostSock := filepath.Join(l.Instance.Dir, fmt.Sprintf(filenames.VhostSock, i))
-		vhostSockExists := false
-		for attempt := 0; attempt < 5; attempt++ {
-			logrus.Debugf("Try waiting for %s to appear (attempt %d)", vhostSock, attempt)
-
-			if _, err := os.Stat(vhostSock); err != nil {
-				if !errors.Is(err, fs.ErrNotExist) {
-					logrus.Warnf("Failed to check for vhost socket: %v", err)
-				}
-			} else {
-				vhostSockExists = true
-				break
-			}
-
-			retry := time.NewTimer(200 * time.Millisecond)
-			select {
-			case err = <-vhostWaitCh:
-				return nil, fmt.Errorf("virtiofsd never created vhost socket: %w", err)
-			case <-retry.C:
-			}
-		}
-
-		if !vhostSockExists {
-			return nil, fmt.Errorf("vhost socket %s never appeared", vhostSock)
-		}
-
-		go func() {
-			if err := <-vhostWaitCh; err != nil {
-				logrus.Errorf("Error from virtiofsd instance #%d: %v", i, err)
-			}
-		}()
-	}
-
-	logrus.Infof("Starting QEMU (hint: to watch the boot progress, see %q)", filepath.Join(qCfg.InstanceDir, "serial*.log"))
-	logrus.Debugf("qCmd.Args: %v", qCmd.Args)
-	if err := qCmd.Start(); err != nil {
-		return nil, err
-	}
-	l.qCmd = qCmd
-	l.qWaitCh = make(chan error)
 	go func() {
-		l.qWaitCh <- qCmd.Wait()
-	}()
-	l.vhostCmds = vhostCmds
-	go func() {
-		if usernetIndex := limayaml.FirstUsernetIndex(l.Instance.Config); usernetIndex != -1 {
-			client := usernet.NewClientByName(l.Instance.Config.Networks[usernetIndex].Lima)
-			err := client.ConfigureDriver(ctx, l.BaseDriver)
-			if err != nil {
-				l.qWaitCh <- err
-			}
+		defer close(ch)
+		configData, err := yaml.Marshal(l.Instance.Config)
+		if err != nil {
+			return
 		}
+		logrus.Info("[LimaQemuDriver]Starting QEMU")
+		args := plugin.StartArgs{
+			InstanceName: l.Instance.Name,
+			ConfigData:   configData,
+			InstanceDir:  l.Instance.Dir,
+			SSHLocalPort: l.SSHLocalPort,
+			SSHAddress:   l.Instance.SSHAddress,
+		}
+		logrus.Infof("[LimaQemuDriver]Starting VM: %s", args.InstanceName)
+		var reply string
+		if err := l.client.Call("QemuPlugin.Start", args, &reply); err != nil {
+			ch <- fmt.Errorf("RPC call failed: %v", err)
+			return
+		}
+		l.ProcessId = reply
+		logrus.Infof("[LimaQemuDriver]Started QEMU process: %s", l.ProcessId)
+		ch <- nil
 	}()
-	return l.qWaitCh, nil
+	logrus.Info("QEMU started")
+	return ch, nil
 }
 
 func (l *LimaQemuDriver) Stop(ctx context.Context) error {

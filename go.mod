@@ -3,6 +3,8 @@ module github.com/lima-vm/lima
 
 go 1.23.0
 
+replace github.com/lima-vm/lima => /lima //my local path
+
 require (
 	al.essio.dev/pkg/shellescape v1.5.1
 	github.com/AlecAivazis/survey/v2 v2.3.7
@@ -139,3 +141,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+require github.com/saz97/lima v0.8.2
