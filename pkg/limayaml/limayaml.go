@@ -86,14 +86,13 @@ const (
 	QEMU VMType = "qemu"
 	VZ   VMType = "vz"
 	WSL2 VMType = "wsl2"
-	RPC  VMType = "rpc"
 )
 
 var (
 	OSTypes    = []OS{LINUX}
 	ArchTypes  = []Arch{X8664, AARCH64, ARMV7L, RISCV64}
 	MountTypes = []MountType{REVSSHFS, NINEP, VIRTIOFS, WSLMount}
-	VMTypes    = []VMType{QEMU, VZ, WSL2, RPC}
+	VMTypes    = []VMType{QEMU, VZ, WSL2}
 )
 
 type User struct {

@@ -2,12 +2,15 @@ package plugin
 
 type VMDriver interface {
 	// Start starts the VM.
-	Start(instanceName string, Config []byte) error
+	Start(args StartArgs) (string, error)
 }
 
 type StartArgs struct {
 	InstanceName string
-	Config       []byte
+	ConfigData   []byte
+	InstanceDir  string
+	SSHLocalPort int
+	SSHAddress   string
 }
 
 type StopArgs struct {

@@ -55,6 +55,7 @@ func (q *QemuPlugin) Start(args plugin.StartArgs, reply *string) error {
 		qArgsFinal = append(qArgsFinal, applied)
 	}
 	qCmd := exec.CommandContext(ctx, qExe, qArgsFinal...)
+	log.Printf("[QemuPlugin] Command: %s %s", qExe, strings.Join(qArgsFinal, " "))
 	qCmd.ExtraFiles = append(qCmd.ExtraFiles, applier.files...)
 	qStdout, _ := qCmd.StdoutPipe()
 	go logPipeRoutine(qStdout, "qemu[stdout]")

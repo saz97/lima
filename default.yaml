@@ -1,1 +1,13 @@
-vmType: "rpc"
+vmType: null
+
+# Arch: "default", "x86_64", "aarch64".
+# 🟢 Builtin default: "default" (corresponds to the host architecture)
+arch: null
+
+# OpenStack-compatible disk image.
+# 🟢 Builtin default: none (must be specified)
+# 🔵 This file: Ubuntu images
+images:
+# Try to use release-yyyyMMdd image if available. Note that release-yyyyMMdd will be removed after several months.
+- location: "https://cloud-images.ubuntu.com/releases/24.10/release-20250129/ubuntu-24.10-server-cloudimg-amd64.img"
+  arch: "x86_64"
